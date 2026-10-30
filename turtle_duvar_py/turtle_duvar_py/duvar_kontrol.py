@@ -1,5 +1,4 @@
 import math
-import time
 
 import rclpy
 from rclpy.node import Node
@@ -14,8 +13,9 @@ class DuvarKontrol(Node):
 
         self.pose = None
         self.hedef_aci = None
+        self.kacis_modu = False
         self.hiz = 1.0
-        self.son_log = time.monotonic()
+        self.son_log = 0.0
 
         self.abone = self.create_subscription(
             Pose,
@@ -48,34 +48,39 @@ class DuvarKontrol(Node):
 
         mesaj = Twist()
 
-        if time.monotonic() - self.son_log >= 1.0:
+        if self.get_clock().now().nanoseconds - self.son_log >= 1_000_000_000:
             self.get_logger().info(
                 f'Konum: x={x:.2f}, y={y:.2f}'
             )
-            self.son_log = time.monotonic()
+            self.son_log = self.get_clock().now().nanoseconds
 
-        if self.hedef_aci is None:
+        # Guvenli bolgeye girildiginde kacis modunu kapat.
+        if self.kacis_modu:
+            if 1.5 <= x <= 9.5 and 1.5 <= y <= 9.5:
+                self.kacis_modu = False
+                self.hedef_aci = None
+                self.get_logger().info('Guvenli bolgeye girildi.')
 
-            if x < 1.0 or x > 10.0 or y < 1.0 or y > 10.0:
-
+        # Sinira yaklasildiginda merkeze dogru yon belirle.
+        if not self.kacis_modu:
+            if x < 1.5 or x > 9.5 or y < 1.5 or y > 9.5:
+                self.kacis_modu = True
                 self.hedef_aci = math.atan2(5.5 - y, 5.5 - x)
 
                 self.get_logger().info(
-                    f'Sinir asildi! Yeni yon: {self.hedef_aci:.2f}'
+                    f'Sinira yaklasildi! Yeni yon: {self.hedef_aci:.2f}'
                 )
 
-        if self.hedef_aci is not None:
+        # Kacis modunda once hedef yone don, sonra ilerle.
+        if self.kacis_modu:
 
             fark = self.hedef_aci - aci
-
             fark = math.atan2(math.sin(fark), math.cos(fark))
 
             if abs(fark) > 0.08:
                 mesaj.angular.z = 2.0 if fark > 0 else -2.0
-
             else:
-                self.get_logger().info('Yeni yone donuldu.')
-                self.hedef_aci = None
+                mesaj.linear.x = self.hiz
 
         else:
             mesaj.linear.x = self.hiz
